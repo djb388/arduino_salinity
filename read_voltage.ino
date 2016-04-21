@@ -13,16 +13,20 @@
 */
 #include <Servo.h>
 
-bool debug = true;  // Flag for debugging purposes
+bool debug = false;  // Flag for debugging purposes
 
-String measurements[40];
+String measurements[30];
 int measurementID = 0;
 
 Servo servo;  // Servo variable for the bead hopper
 unsigned long startTime = -1; // Start time in millis
 unsigned long lastMeasurement = -1; // Current time in millis
 unsigned long lastMix = -1; // Time the last mix began
+float temperature = 21.11;
 
+/*
+  These will change before demo day
+*/
 // Constants for y = ax^2 + bx + c (saline curve)
 float a = 1.743E-10;
 float b = 4.865E-5;
@@ -30,8 +34,6 @@ float c = 0.0;
 // Constants for calibration
 float C1 = 1.0;
 float C2 = 0.0;
-// "Experiment" parameters
-float temperature = 21.11;
 
 /*
    Convert resistivity at 25C to weight percent based on established data
