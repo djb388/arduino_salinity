@@ -43,7 +43,7 @@ typedef struct kv{
 } kv_t;
 
 // Wrapper for key value pair
-kv_t * newKv(int k, float v){
+kv_t * kvNew(int k, float v){
     kv_t *new = NULL;
     new = malloc(sizeof(kv_t));
     new->k = k;
@@ -80,7 +80,7 @@ kv_t * kvRead(char* filename){
     int flag = 1;
     while(fscanf(filedesc, "%d %f\n", &k, &v) != EOF){
         // printf("reading %d, %f\n", k, v);
-        current = newKv(k, v);
+        current = kvNew(k, v);
         if(flag){
             list = current;
             flag = !flag;
@@ -381,10 +381,10 @@ void loop() {
 
         // Record within kv
         if(kvHead == NULL){
-          kvHead = newKv(currentTime, current_salinity);
+          kvHead = kvNew(currentTime, current_salinity);
           kvTail = head;
         }else{
-          kv_t * new = newKv(currentTime, current_salinity);
+          kv_t * new = kvNew(currentTime, current_salinity);
           current->next = new;
           current = new;
         }
