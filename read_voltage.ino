@@ -35,6 +35,62 @@ float c = 0.0;
 float C1 = 1.0;
 float C2 = 0.0;
 
+// Single linked list key value pair
+typedef struct kv{
+    int k;
+    float v;
+    struct kv * next;
+} kv_t;
+
+// Wrapper for key value pair
+kv_t * newKv(int k, float v){
+    kv_t *new = NULL;
+    new = malloc(sizeof(kv_t));
+    new->k = k;
+    new->v = v;
+    return new;
+}
+
+// Free linked lists
+void kvFree(kv_t * list){
+    if(list == NULL)
+        return;
+    kv_t * next = list->next;
+    free(list);
+    listDie(next);
+}
+
+void kvWrite(kv_t * list, char* filename){
+    FILE * filedesc = fopen(filename, "w");
+    kv_t * current = list;
+    while(current != NULL){
+        fprintf(filedesc, "%d %f\n", current->k, current->v);
+        current = current->next;
+    }
+    fclose(filedesc);
+
+}
+
+kv_t * kvRead(char* filename){
+    kv_t * current = NULL;
+    kv_t * list;
+    FILE * filedesc = fopen(filename, "r");
+    int k;
+    float v;
+    int flag = 1;
+    while(fscanf(filedesc, "%d %f\n", &k, &v) != EOF){
+        // printf("reading %d, %f\n", k, v);
+        current = newKv(k, v);
+        if(flag){
+            list = current;
+            flag = !flag;
+        }
+        current = current->next;
+    }
+    fclose(filedesc);
+    return list;
+}
+
 /*
    Convert resistivity at 25C to weight percent based on established data
 */
@@ -226,8 +282,8 @@ void setup() {
   /*
      Calculate volume of saline solution to pump into the mixing tank.
 
-     Beads lose just under 40% (2/5) of their water after 10 mihutes, and 50mL of 
-     beads displaces just over 25mL of water (1/2), so the volume of distilled 
+     Beads lose just under 40% (2/5) of their water after 10 mihutes, and 50mL of
+     beads displaces just over 25mL of water (1/2), so the volume of distilled
      water in the solution at 10 minutes is volume_of_beads / 5 + mL_water.
 
      2 * target salinity / 26 returns the percent of saline solution needed to
@@ -295,7 +351,7 @@ void setup() {
   digitalWrite(12, HIGH);  // Turn off the mixer
   delay(5000);
   lastMix = millis() - 15000;
-  
+
   String id = String(measurementID,DEC);
   measurements[measurementID] = id;
 }
@@ -305,6 +361,9 @@ void setup() {
 */
 void loop() {
   unsigned long currentTime = millis();
+  kv_t * kvHead = NULL;
+  kv_t * kvTail = NULL;
+
   if (currentTime < 600000 + startTime) {
     if (currentTime >= lastMix + 20000) {
       digitalWrite(12, LOW);  // Turn on the mixer
@@ -314,11 +373,22 @@ void loop() {
     } else if (currentTime >= lastMix + 15000) {
       // Try to take a measurement
       float current_salinity = measureSalinity();
-      
+
       if (current_salinity >= 0) {  // If the measurement is significant, print it
         measurements[measurementID].concat(",");
         measurements[measurementID].concat(current_salinity);
         Serial.println(current_salinity);
+
+        // Record within kv
+        if(kvHead == NULL){
+          kvHead = newKv(currentTime, current_salinity);
+          kvTail = head;
+        }else{
+          kv_t * new = newKv(currentTime, current_salinity);
+          current->next = new;
+          current = new;
+        }
+
       }
     } else if (currentTime >= lastMix + 10000) {
       digitalWrite(12, HIGH);  // Turn off the mixer
@@ -333,8 +403,11 @@ void loop() {
     digitalWrite(12, HIGH);  // Turn off the mixer
     while(1) {
       delay(1000);
-    } 
+    }
   }
+
+  kvWrite(kvHead, "salinity.out");
+  kvFree(kvHead);
 }
 
 
