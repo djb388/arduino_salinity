@@ -3,237 +3,48 @@
     This program controls a device that automates an 'experiment.' Automates
     control of a salinity probe, bead hopper, water pump, and mixing impeller.
 
+    Resistivity: (salineResistance * ((temperature + 21.5) / 46.5));
+    Salinity: 0.0000002074 * pow(2.71828,(float)rawRead*0.056);
+
     Pins in use:
-     2 - digital out when reading salinity
-     4 - digital out after reading salinity
+     3 - digital out when reading salinity
+     5 - digital out after reading salinity
      9 - Control of the hopper servo
     12 - control of relay-2 for mixing impeller
-    13 - control of relay-1 for water pump
-    A1 - analog read for salinity
+    13 - control of relay-3 for water pump
+    A1 - analog read for salinity measurements
 */
 #include <Servo.h>
-
-bool debug = false;  // Flag for debugging purposes
-
-String measurements[30];
-int measurementID = 0;
 
 Servo servo;  // Servo variable for the bead hopper
 unsigned long startTime = -1; // Start time in millis
 unsigned long lastMeasurement = -1; // Current time in millis
-unsigned long lastMix = -1; // Time the last mix began
-float temperature = 21.11;
-
-/*
-  These will change before demo day
-*/
-// Constants for y = ax^2 + bx + c (saline curve)
-float a = 1.743E-10;
-float b = 4.865E-5;
-float c = 0.0;
-// Constants for calibration
-float C1 = 1.0;
-float C2 = 0.0;
-
-// Single linked list key value pair
-typedef struct kv{
-    int k;
-    float v;
-    struct kv * next;
-} kv_t;
-
-// Wrapper for key value pair
-kv_t * kvNew(int k, float v){
-    kv_t *new = NULL;
-    new = malloc(sizeof(kv_t));
-    new->k = k;
-    new->v = v;
-    return new;
-}
-
-// Free linked lists
-void kvFree(kv_t * list){
-    if(list == NULL)
-        return;
-    kv_t * next = list->next;
-    free(list);
-    listDie(next);
-}
-
-void kvWrite(kv_t * list, char* filename){
-    FILE * filedesc = fopen(filename, "w");
-    kv_t * current = list;
-    while(current != NULL){
-        fprintf(filedesc, "%d %f\n", current->k, current->v);
-        current = current->next;
-    }
-    fclose(filedesc);
-
-}
-
-kv_t * kvRead(char* filename){
-    kv_t * current = NULL;
-    kv_t * list;
-    FILE * filedesc = fopen(filename, "r");
-    int k;
-    float v;
-    int flag = 1;
-    while(fscanf(filedesc, "%d %f\n", &k, &v) != EOF){
-        // printf("reading %d, %f\n", k, v);
-        current = kvNew(k, v);
-        if(flag){
-            list = current;
-            flag = !flag;
-        }
-        current = current->next;
-    }
-    fclose(filedesc);
-    return list;
-}
-
-/*
-   Convert resistivity at 25C to weight percent based on established data
-*/
-float weightPercent(float resistivity) {
-  float x = 1000000 / resistivity;
-  return a * x * x + b * x + c;
-}
-
-/*
-   Calculate resistivity from measured resistance
-*/
-float resistivity(float salineResistance) {
-  return (salineResistance * C1 * ((temperature + 21.5) / 46.5)) + C2;
-}
+long lastMix = 0; // Time the last mix began
+unsigned int salinity_average = 0;  // Average of 3 consecutive measurements
+int count_measurements = 0; // Count to 3 consecutive measurements
 
 /*
    Take a salinity measurement
    Function will only run once per second, regardless of when calls are made
 */
-float measureSalinity() {
-  float wtPercent = -1;
+int measureSalinity() {
+  int probeReading = -1;
   int timeDelay = millis() - lastMeasurement; // Has it been 1 second since the last measurement?
   if (timeDelay >= 1000) { // If so, take a measurement
     lastMeasurement = millis();
-    pinMode(2, OUTPUT);
+    pinMode(3, OUTPUT);
     delay(1);
-    digitalWrite(2, HIGH);
+    digitalWrite(3, HIGH);
     delay(1);
-    int probeReading = analogRead(A1);
-    digitalWrite(2, LOW);
-    pinMode(2, INPUT);
+    probeReading = analogRead(A1);
+    digitalWrite(3, LOW);
+    pinMode(3, INPUT);
     delay(1);
-    digitalWrite(4, HIGH);
+    digitalWrite(5, HIGH);
     delay(1);
-    digitalWrite(4, LOW);
-
-    float probe = probeReading * 5.0;
-    float Vout = probe / 1023.0;
-    probe = (5.0 / Vout) - 1.0;
-    float saline = 330 * probe;
-    float rho = resistivity(saline);
-    float microMho = 1.0 / rho;
-    wtPercent = weightPercent(rho);
-
-    if (debug) {
-      // Terminal formatting:
-//      Serial.print("Vout: ");
-//      Serial.print(Vout);
-//      Serial.print("V, R: ");
-//      Serial.print(saline);
-//      Serial.print(" ohms, Resistivity: ");
-//      Serial.print(rho);
-//      Serial.print(" ohms-cm, Conductivity: ");
-//      Serial.print(microMho);
-//      Serial.print(" micromhos, Wt%: ");
-//      Serial.print(wtPercent);
-//      Serial.println("%");
-      // CSV formatting:
-      Serial.print(Vout);
-      Serial.print(",");
-      Serial.print(saline);
-      Serial.print(",");
-      Serial.print(rho);
-      Serial.print(",");
-      Serial.print(microMho);
-      Serial.print(",");
-      Serial.println(wtPercent);
-    }
+    digitalWrite(5, LOW);
   }
-  return wtPercent;
-}
-
-/*
-   Prompt the user to verify a String message
-*/
-bool verify(String msg) {
-  Serial.println("");
-  Serial.print(msg + " (y/n): ");
-  char response = 'a';
-  do {
-    if (Serial.available()) {
-      response = Serial.read();
-      if (response != 'n' && response != 'y') {
-        Serial.println("");
-        Serial.println("Invalid response. Please enter 'y' for yes or 'n' for no: ");
-        Serial.print(msg + " (y/n): ");
-      }
-    }
-    delay(10);
-  } while (response != 'n' && response != 'y');
-  Serial.println("");
-  return response == 'y';
-}
-
-/*
-   Promps user for input with msg, then verifies their response with
-   the String verifyMsgPrefix + input + verifyMsgPostfix
-*/
-float getFloatInput(String msg, String verifyMsgPrefix, String verifyMsgPostfix) {
-  Serial.print(msg);
-  float input = -1.0;
-  while (input < 0) {
-    if (Serial.available() > 0) {
-      input = Serial.parseFloat();
-      String verifyMsg = verifyMsgPrefix + String(input) + verifyMsgPostfix;
-      if (!verify(verifyMsg)) {
-        input = -1.0;
-        Serial.print(msg);
-      }
-    }
-    delay(10);
-  }
-  Serial.println("");
-  return input;
-}
-
-/*
-   Calibrate the probe
-*/
-void calibrate() {
-  String percents[] = {"20","16","12","8","4"};
-  for (int i = 0; i < 5; i++) {
-    Serial.println("Place probe in " + percents[i] + "% saline and enter any key");
-    while(Serial.available() == 0) {
-      delay(10);
-    }
-    for (int j = 0; j < 5; j++) {
-      pinMode(2, OUTPUT);
-      delay(1);
-      digitalWrite(2, HIGH);
-      delay(1);
-      int probeReading = analogRead(A1);
-      digitalWrite(2, LOW);
-      pinMode(2, INPUT);
-      delay(1);
-      digitalWrite(4, HIGH);
-      delay(1);
-      digitalWrite(4, LOW);
-      delay(995);
-      Serial.print(probeReading + ",");
-    }
-    Serial.println("");
-  }
+  return probeReading;
 }
 
 /*
@@ -243,12 +54,12 @@ void calibrate() {
 void setup() {
   // Initialize components
   Serial.begin(9600);
-  pinMode(2, INPUT);  // Control for current through probe when reading
-  pinMode(4, OUTPUT); // Control for current through probe after reading
+  pinMode(3, INPUT);  // Control for current through probe when reading
+  pinMode(5, OUTPUT); // Control for current through probe after reading
   pinMode(13, OUTPUT);  // Control of relay-1 for water pump
-  digitalWrite(13, HIGH); // Ensure relay-1 is off
+  digitalWrite(13, LOW); // Ensure relay-1 is off
   pinMode(12, OUTPUT);  // Control of relay-2 for mixing impeller
-  digitalWrite(12, HIGH); // Ensure relay-2 is off
+  digitalWrite(12, LOW); // Ensure relay-2 is off
   servo.attach(9); // Attach the servo controller to the servo
   // Move the servo to ensure it is in the correct starting position
   servo.write(0);
@@ -258,75 +69,70 @@ void setup() {
   servo.write(0);
   delay(1000);
 
-  // Get experiment parameters from the user
-  String msg = "Enter initial volume of DI water in mixing tank (in mL): ";
-  String verifyMsgA = "";
-  String verifyMsgB = "mL of DI water is in the mixing tank, is that correct?";
-  int mL_water = (int) getFloatInput(msg, verifyMsgA, verifyMsgB);
-
-  msg = "Enter volume of beads to dispense (in mL): ";
-  verifyMsgA = "";
-  verifyMsgB = "mL of beads will be dispensed, is that correct?";
-  int volume_of_beads = (int) getFloatInput(msg, verifyMsgA, verifyMsgB);
-
-  msg = "Enter target salinity (in weight percent): ";
-  verifyMsgA = "Target salinity = ";
-  verifyMsgB = "%, is that correct?";
-  float target_salinity = getFloatInput(msg, verifyMsgA, verifyMsgB);
-
-  msg = "Enter temperature of saline solution (in degrees C): ";
-  verifyMsgA = "Temperature = ";
-  verifyMsgB = "C, is that correct?";
-  temperature = getFloatInput(msg, verifyMsgA, verifyMsgB);
-
-  /*
-     Calculate volume of saline solution to pump into the mixing tank.
-
-     Beads lose just under 40% (2/5) of their water after 10 mihutes, and 50mL of
-     beads displaces just over 25mL of water (1/2), so the volume of distilled
-     water in the solution at 10 minutes is volume_of_beads / 5 + mL_water.
-
-     2 * target salinity / 26 returns the percent of saline solution needed to
-     reach the target salinity (target_salinity / 13).
-  */
-  int mL_saline = (volume_of_beads / 5 + mL_water) * target_salinity / 13;
-  // pump time = 1.5 seconds + (volume of saline to pump / 200mL per 2.25 seconds)
-  unsigned long pumpTime = 1500 + (mL_saline / 200 * 2250);
-
-  float beads_dispensed = 0;
-  unsigned long last_dispense = -1;
-  bool dispensing = true;
-  bool pumping = true;
-  bool servo_opening = true;
-
-  Serial.println("");
-  Serial.println("Enter any key to begin");
-  Serial.println("");
-  while (Serial.available() <= 0) {
+  // Wait for experiment parameters from serial input
+  while(!Serial.available()) {
     delay(10);
   }
+  unsigned int volume_of_beads = Serial.parseInt();
+  // If we aren't dispensing beads, we are calibrating
+  while (volume_of_beads == 0) {
+    int current_salinity = measureSalinity();
+    if (current_salinity > 0) {
+      salinity_average += current_salinity;
+      count_measurements += 1;
+    }
+    if (count_measurements == 3) {
+      salinity_average /= count_measurements;
+      Serial.println(salinity_average);
+      salinity_average = 0;
+      count_measurements = 0;
+    }
+    delay(1500);
+  }
+  Serial.println(volume_of_beads);  // ACK the bead volume
+  // We aren't calibrating, so get the remaining variables
+  while(Serial.available()) { // Clear serial data
+    Serial.read();
+  }
+  while(!Serial.available()) {  // Wait for serial data
+    delay(10);
+  }
+  float mL_saline = Serial.parseInt();
+  Serial.println(mL_saline);  // ACK the saline solution volume
+  while(Serial.available()) { // Clear serial data
+    Serial.read();
+  }
+  // pump time = 1.5 seconds + (volume of saline to pump / 200mL per 2.25 seconds)
+  unsigned long pumpTime = 1500 + ((((float)mL_saline) / 200.0) * 2250.0);
 
-  digitalWrite(13, LOW);  // begin pumping saline solution
+  float beads_dispensed = 0;  // Beads dispensed so far
+  unsigned long last_dispense = -1; // Time of last dispense
+  bool dispensing = true; // Flag indicating dispensing status
+  bool pumping = true;  // Flag indicating saline pump status
+  bool servo_opening = true;  // Flag indicating servo status
+
+  digitalWrite(13, HIGH);  // begin pumping saline solution
 
   unsigned long currentTime = millis(); // Get the time
   startTime = currentTime; // Set the starting time
   pumpTime += startTime; // Pump will stop at time pumpTime + start time (startTime)
-
+  
   // Dispense all of the necessary materials
   while (pumping || dispensing) {
 
     // Check if we need to turn off the pump
     if (pumping && currentTime >= pumpTime) {
       pumping = false;
-      digitalWrite(13, HIGH); // Turn off the pump
+      digitalWrite(13, LOW); // Turn off the pump
+      digitalWrite(12, HIGH);  // Turn on the mixer
     }
 
     // Check if we need to turn the mixer on or off
-    if (!pumping && lastMix < 0) {
-      digitalWrite(12, LOW);  // Turn on the mixer
+    if (!pumping && lastMix == 0) {
+      digitalWrite(12, HIGH);  // Turn on the mixer
       lastMix = millis();
     } else if (!pumping && currentTime >= lastMix + 30000) {
-      digitalWrite(12, HIGH);  // Turn off the mixer
+      digitalWrite(12, LOW);  // Turn off the mixer
     }
 
     // Check if we need to manipulate the hopper's servo
@@ -344,70 +150,48 @@ void setup() {
     }
     currentTime = millis();
   }
-
-  while (millis() < lastMix + 30000) {
-    delay(1);
-  }
-  digitalWrite(12, HIGH);  // Turn off the mixer
+  digitalWrite(12, LOW);  // Turn off the mixer
   delay(5000);
-  lastMix = millis() - 15000;
-
-  String id = String(measurementID,DEC);
-  measurements[measurementID] = id;
+  lastMix = millis() - 20000;
 }
 
 /*
    Run the experiment
 */
 void loop() {
-  unsigned long currentTime = millis();
-  kv_t * kvHead = NULL;
-  kv_t * kvTail = NULL;
-
-  if (currentTime < 600000 + startTime) {
+  unsigned long currentTime = millis(); // Get the current time in ms
+  if (currentTime < 600000 + startTime) { // Run for a total of 10 minutes
+    
+    // Turn on the mixer every 20 seconds
     if (currentTime >= lastMix + 20000) {
-      digitalWrite(12, LOW);  // Turn on the mixer
+      digitalWrite(12, HIGH);  // Turn on the mixer
       lastMix = currentTime;
-      measurementID += 1;
-      measurements[measurementID] = String(measurementID,DEC);
+      salinity_average /= count_measurements;
+      Serial.println(salinity_average);
+      salinity_average = 0;
+      count_measurements = 0;
+
+    // Take measurements 15 seconds after the start of the last mix
     } else if (currentTime >= lastMix + 15000) {
       // Try to take a measurement
-      float current_salinity = measureSalinity();
-
-      if (current_salinity >= 0) {  // If the measurement is significant, print it
-        measurements[measurementID].concat(",");
-        measurements[measurementID].concat(current_salinity);
-        Serial.println(current_salinity);
-
-        // Record within kv
-        if(kvHead == NULL){
-          kvHead = kvNew(currentTime, current_salinity);
-          kvTail = head;
-        }else{
-          kv_t * new = kvNew(currentTime, current_salinity);
-          current->next = new;
-          current = new;
-        }
-
+      int current_salinity = measureSalinity();
+      if (current_salinity > 0) {
+        salinity_average += current_salinity;
+        count_measurements += 1;
+        delay(1500);
       }
+
+    // Turn off the mixer after it runs for 10 seconds
     } else if (currentTime >= lastMix + 10000) {
-      digitalWrite(12, HIGH);  // Turn off the mixer
+      digitalWrite(12, LOW);  // Turn off the mixer
     }
-  } else if (measurementID > 0) {
-    Serial.println("ID,Measurement1,Measurement2,Measurement3,Measurement4,Measurement5");
-    for (int i = 0; i < measurementID; i++) {
-      Serial.println(measurements[i]);
-    }
-    measurementID = -1;
+
+  // Experiment is over
   } else {
-    digitalWrite(12, HIGH);  // Turn off the mixer
-    while(1) {
+    digitalWrite(12, LOW);  // Ensure the mixer is off
+    Serial.println("END");  // Indicate that the experiment is over
+    while(1) {  // Do nothing until Arduino is turned off
       delay(1000);
-    }
+    } 
   }
-
-  kvWrite(kvHead, "salinity.out");
-  kvFree(kvHead);
 }
-
-
